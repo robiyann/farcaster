@@ -708,7 +708,7 @@ def follow_all_users(user_info_path="user_info.json"):
                 else:
                     print(f"  Failed to follow '{target_username}'.")
             except Exception as e:
-                print(f"  An error occurred while '{follower_user}' tried to follow '{target_user}': {e}")
+                print(f"  An error occurred while '{follower_username}' tried to follow '{target_username}': {e}")
             
             time.sleep(random.uniform(min_delay_follow, max_delay_follow)) # Random delay between follows
 
@@ -887,7 +887,7 @@ if __name__ == "__main__":
     print("2. Auto like dan recast by url/hash")
     print("3. Auto Like dan Recast semua pengguna kita")
     print("4. Follow/Unfollow User")
-    print("5. Follow All Users pengguna kita")
+    print("5. Follow antar akun Kita")
     print("6. Ambil Info User (dari bearer.txt)")
     choice = input("Masukkan pilihan (1/2/3/4/5/6): ")
 
