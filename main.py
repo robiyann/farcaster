@@ -669,7 +669,7 @@ def follow_all_users(user_info_path="user_info.json"):
 
     print(f"Found {len(users)} users. Starting follow process...")
 
-    min_delay_follow, max_delay_follow, _, _ = load_delay_settings()
+    min_delay_follow, max_delay_follow, _, _, _ = load_delay_settings()
 
     for follower_user in users:
         follower_fid = follower_user.get("fid")
