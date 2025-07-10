@@ -25,9 +25,10 @@ ACCEPT_LANGUAGES = [
 ]
 
 class FarcasterBot:
-    def __init__(self, bearer_token):
+    def __init__(self, bearer_token, proxy=None):
         self.bearer_token = bearer_token
         self.base_url = "https://client.farcaster.xyz"
+        self.proxy = proxy
 
         # --- Variasikan header saat inisialisasi bot ---
         self.headers = {
@@ -46,22 +47,30 @@ class FarcasterBot:
         headers = self.headers.copy() # Salin header untuk setiap permintaan
         headers["Idempotency-Key"] = str(uuid.uuid4()) # Idempotency-Key harus unik per permintaan
 
+        proxies = None
+        if self.proxy:
+            proxies = {
+                'http': self.proxy,
+                'https': self.proxy
+            }
+
         try:
             if method == "GET":
-                response = requests.get(url, headers=headers, params=params, timeout=10)
+                response = requests.get(url, headers=headers, params=params, proxies=proxies, timeout=10)
             elif method == "POST":
-                response = requests.post(url, headers=headers, json=json_data, timeout=10)
+                response = requests.post(url, headers=headers, json=json_data, proxies=proxies, timeout=10)
             elif method == "PUT":
-                response = requests.put(url, headers=headers, json=json_data, timeout=10)
+                response = requests.put(url, headers=headers, json=json_data, proxies=proxies, timeout=10)
             elif method == "DELETE":
-                response = requests.delete(url, headers=headers, json=json_data, timeout=10)
+                response = requests.delete(url, headers=headers, json=json_data, proxies=proxies, timeout=10)
             else:
                 raise ValueError(f"Metode HTTP tidak didukung: {method}")
 
             response.raise_for_status() # Angkat HTTPError untuk respons buruk (4xx atau 5xx)
             return response
         except requests.exceptions.RequestException as e:
-            print(f"Error saat membuat permintaan ke {url}: {e}")
+            proxy_info = f" via proxy {self.proxy}" if self.proxy else ""
+            print(f"Error saat membuat permintaan ke {url}{proxy_info}: {e}")
             return None
 
     def follow_user(self, fid):
@@ -93,6 +102,17 @@ class FarcasterBot:
         payload = {"castHash": cast_hash}
         response = self._make_request("DELETE", url, json_data=payload)
         return response and response.status_code == 200
+
+    def recast_cast_by_url(self, url):
+        try:
+            username, prefix = self._extract_username_and_prefix(url)
+            full_hash = self._get_full_cast_hash(username, prefix)
+            if full_hash:
+                return self.recast_cast(full_hash)
+            return False
+        except Exception as e:
+            print(f"  Error saat recast by URL: {e}")
+            return False
 
     def like_cast_by_url(self, url):
         try:
@@ -182,7 +202,25 @@ class FarcasterBot:
             return data.get("result", {}).get("cast", {}).get("viewerContext", {}).get("recast", False)
         return False
 
-def post_casts_from_users(user_info_path="user_info.json", posts_file_path="post.txt", max_retries=3, retry_delay=10):
+def load_delay_settings():
+    try:
+        with open('delay.json', 'r') as f:
+            settings = json.load(f)
+            return (
+                settings["min_action_delay"],
+                settings["max_action_delay"],
+                settings["min_user_delay"],
+                settings["max_user_delay"],
+                settings["retry_delay"]
+            )
+    except FileNotFoundError:
+        print("Error: File 'delay.json' tidak ditemukan. Harap buat file tersebut dengan konfigurasi yang benar.")
+        import sys; sys.exit()
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"Error pada 'delay.json': {e}. Pastikan file tersebut berisi semua kunci yang diperlukan dan formatnya valid.")
+        import sys; sys.exit()
+
+def post_casts_from_users(user_info_path="user_info.json", posts_file_path="post.txt", max_retries=3):
     try:
         with open(user_info_path, 'r') as f:
             users = json.load(f)
@@ -215,20 +253,13 @@ def post_casts_from_users(user_info_path="user_info.json", posts_file_path="post
 
     print(f"Found {len(posts)} posts in '{posts_file_path}'.")
 
-    while True:
-        try:
-            min_delay_action = float(input("Masukkan delay minimum (detik) antara postingan (misal: 5): "))
-            max_delay_action = float(input("Masukkan delay maksimum (detik) antara postingan (misal: 15): "))
-            if min_delay_action < 0 or max_delay_action < min_delay_action:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    min_delay_action, max_delay_action, _, _, retry_delay = load_delay_settings()
 
     for i, user in enumerate(users):
         user_fid = user.get("fid")
         user_bearer = user.get("bearer")
         user_username = user.get("username", "Unknown")
+        user_proxy = user.get("proxy")
 
         if not user_fid or not user_bearer:
             print(f"Skipping user {user_username}: Missing FID or bearer token.")
@@ -240,7 +271,7 @@ def post_casts_from_users(user_info_path="user_info.json", posts_file_path="post
 
         cast_text = posts[i]
         print(f"User '{user_username}' (FID: {user_fid}) is preparing to post a cast.")
-        bot = FarcasterBot(user_bearer)
+        bot = FarcasterBot(user_bearer, user_proxy)
 
         retries = 0
         success = False
@@ -263,7 +294,7 @@ def post_casts_from_users(user_info_path="user_info.json", posts_file_path="post
         
         time.sleep(random.uniform(min_delay_action, max_delay_action)) # Random delay between posts
 
-def post_single_cast_per_user(user_info_path="user_info.json", max_retries=3, retry_delay=10):
+def post_single_cast_per_user(user_info_path="user_info.json", max_retries=3):
     try:
         with open(user_info_path, 'r') as f:
             users = json.load(f)
@@ -280,20 +311,13 @@ def post_single_cast_per_user(user_info_path="user_info.json", max_retries=3, re
 
     print(f"Found {len(users)} users. Starting single cast posting process...")
 
-    while True:
-        try:
-            min_delay_action = float(input("Masukkan delay minimum (detik) antara postingan (misal: 5): "))
-            max_delay_action = float(input("Masukkan delay maksimum (detik) antara postingan (misal: 15): "))
-            if min_delay_action < 0 or max_delay_action < min_delay_action:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    min_delay_action, max_delay_action, _, _, retry_delay = load_delay_settings()
 
     for user in users:
         user_fid = user.get("fid")
         user_bearer = user.get("bearer")
         user_username = user.get("username", "Unknown")
+        user_proxy = user.get("proxy")
 
         if not user_fid or not user_bearer:
             print(f"Skipping user {user_username}: Missing FID or bearer token.")
@@ -305,7 +329,7 @@ def post_single_cast_per_user(user_info_path="user_info.json", max_retries=3, re
             continue
 
         print(f"User '{user_username}' (FID: {user_fid}) is preparing to post: \"{cast_text}\"")
-        bot = FarcasterBot(user_bearer)
+        bot = FarcasterBot(user_bearer, user_proxy)
 
         retries = 0
         success = False
@@ -328,7 +352,72 @@ def post_single_cast_per_user(user_info_path="user_info.json", max_retries=3, re
         
         time.sleep(random.uniform(min_delay_action, max_delay_action)) # Random delay between posts
 
+def like_and_recast_by_url(user_info_path="user_info.json"):
+    try:
+        with open(user_info_path, 'r') as f:
+            users = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: File '{user_info_path}' not found.")
+        return
+    except json.JSONDecodeError:
+        print(f"Error: Could not decode JSON from '{user_info_path}'.")
+        return
+
+    if not users:
+        print("No users found in user_info.json.")
+        return
+
+    cast_url = input("Masukkan URL postingan yang akan di-like dan di-recast: ")
+    if not cast_url.strip():
+        print("URL tidak boleh kosong.")
+        return
+
+    print(f"Semua {len(users)} pengguna akan me-like dan me-recast: {cast_url}")
+
+    min_delay_action, max_delay_action, min_delay_between_users, max_delay_between_users = load_delay_settings()
+
+    for user in users:
+        user_fid = user.get("fid")
+        user_bearer = user.get("bearer")
+        user_username = user.get("username", "Unknown")
+        user_proxy = user.get("proxy")
+
+        if not user_fid or not user_bearer:
+            print(f"Skipping user {user_username}: Missing FID or bearer token.")
+            continue
+
+        print(f"\nUser '{user_username}' (FID: {user_fid}) sedang memproses...")
+        bot = FarcasterBot(user_bearer, user_proxy)
+
+        # Like
+        print(f"  Mencoba me-like postingan...")
+        try:
+            if bot.like_cast_by_url(cast_url):
+                print(f"    Berhasil me-like postingan.")
+            else:
+                print(f"    Gagal me-like postingan (mungkin sudah di-like).")
+        except Exception as e:
+            print(f"    Terjadi error saat me-like: {e}")
+
+        time.sleep(random.uniform(min_delay_action, max_delay_action))
+
+        # Recast
+        print(f"  Mencoba me-recast postingan...")
+        try:
+            if bot.recast_cast_by_url(cast_url):
+                print(f"    Berhasil me-recast postingan.")
+            else:
+                print(f"    Gagal me-recast postingan (mungkin sudah di-recast).")
+        except Exception as e:
+            print(f"    Terjadi error saat me-recast: {e}")
+
+        print(f"User '{user_username}' selesai. Menunggu sebelum pengguna berikutnya...")
+        time.sleep(random.uniform(min_delay_between_users, max_delay_between_users))
+
+    print("Proses Like & Recast by URL selesai.")
+
 def auto_like_and_recast_posts(user_info_path="user_info.json"):
+
     try:
         with open(user_info_path, 'r') as f:
             users = json.load(f)
@@ -345,25 +434,7 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
 
     print(f"Found {len(users)} users. Starting auto-like and recast process...")
 
-    while True:
-        try:
-            min_delay_likes_recasts = float(input("Masukkan delay minimum (detik) antara like/recast (misal: 1): "))
-            max_delay_likes_recasts = float(input("Masukkan delay maksimum (detik) antara like/recast (misal: 5): "))
-            if min_delay_likes_recasts < 0 or max_delay_likes_recasts < min_delay_likes_recasts:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
-
-    while True:
-        try:
-            min_delay_between_users = float(input("Masukkan delay minimum (detik) antara pengguna (misal: 15): "))
-            max_delay_between_users = float(input("Masukkan delay maksimum (detik) antara pengguna (misal: 25): "))
-            if min_delay_between_users < 0 or max_delay_between_users < min_delay_between_users:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    min_delay_likes_recasts, max_delay_likes_recasts, min_delay_between_users, max_delay_between_users = load_delay_settings()
 
     # Optimization: Fetch all latest cast hashes once
     all_latest_casts = {}
@@ -373,7 +444,7 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
         if target_fid:
             # Use a temporary bot instance to fetch public cast info
             # This assumes any bearer token can fetch public cast info
-            temp_bot = FarcasterBot(user.get("bearer")) 
+            temp_bot = FarcasterBot(user.get("bearer"), user.get("proxy")) 
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
@@ -385,13 +456,14 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
         liker_fid = liker_user.get("fid")
         liker_bearer = liker_user.get("bearer")
         liker_username = liker_user.get("username", "Unknown")
+        liker_proxy = liker_user.get("proxy")
 
         if not liker_fid or not liker_bearer:
             print(f"Skipping liker user {liker_username}: Missing FID or bearer token.")
             continue
 
         print(f"\nUser '{liker_username}' (FID: {liker_fid}) is starting to like and recast posts.")
-        liker_bot = FarcasterBot(liker_bearer)
+        liker_bot = FarcasterBot(liker_bearer, liker_proxy)
 
         for target_user in users:
             if liker_fid == target_user.get("fid"):
@@ -420,6 +492,8 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
                             print(f"    Failed to like {target_username}'s post.")
                     except Exception as e:
                         print(f"    An error occurred while {liker_username} tried to like {target_username}'s post: {e}")
+
+                time.sleep(random.uniform(min_delay_likes_recasts, max_delay_likes_recasts))
 
                 # Cek apakah sudah di-recast
                 if liker_bot.is_recasted(latest_cast_hash):
@@ -476,23 +550,18 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
     liker_fid = selected_user.get("fid")
     liker_bearer = selected_user.get("bearer")
     liker_username = selected_user.get("username", "Unknown")
+    liker_proxy = selected_user.get("proxy")
 
     if not liker_fid or not liker_bearer:
         print(f"Skipping selected user {liker_username}: Missing FID or bearer token.")
         return
 
     print(f"\nUser '{liker_username}' (FID: {liker_fid}) is starting to like and recast posts.")
-    liker_bot = FarcasterBot(liker_bearer)
+    liker_bot = FarcasterBot(liker_bearer, liker_proxy)
 
-    while True:
-        try:
-            min_delay_likes_recasts = float(input("Masukkan delay minimum (detik) antara like/recast (misal: 1): "))
-            max_delay_likes_recasts = float(input("Masukkan delay maksimum (detik) antara like/recast (misal: 5): "))
-            if min_delay_likes_recasts < 0 or max_delay_likes_recasts < min_delay_likes_recasts:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    # Hardcoded delays
+    min_delay_likes_recasts = 4
+    max_delay_likes_recasts = 15
 
     # Optimization: Fetch all latest cast hashes once
     all_latest_casts = {}
@@ -500,7 +569,7 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
         target_fid = user.get("fid")
         target_username = user.get("username", "Unknown")
         if target_fid:
-            temp_bot = FarcasterBot(user.get("bearer")) 
+            temp_bot = FarcasterBot(user.get("bearer"), user.get("proxy")) 
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
@@ -529,8 +598,7 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
             else:
                 try:
                     success_like = liker_bot._like_cast(latest_cast_hash)
-                    if success_like:
-                        print(f"    Successfully liked {target_username}'s post (Hash: {latest_cast_hash[:8]}...).")
+                    if success_like:                        print(f"    Successfully liked {target_username}'s post (Hash: {latest_cast_hash[:8]}...).")
                     else:
                         print(f"    Failed to like {target_username}'s post.")
                 except Exception as e:
@@ -572,27 +640,20 @@ def follow_all_users(user_info_path="user_info.json"):
 
     print(f"Found {len(users)} users. Starting follow process...")
 
-    while True:
-        try:
-            min_delay_follow = float(input("Masukkan delay minimum (detik) antara follow (misal: 1): "))
-            max_delay_follow = float(input("Masukkan delay maksimum (detik) antara follow (misal: 5): "))
-            if min_delay_follow < 0 or max_delay_follow < min_delay_follow:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    min_delay_follow, max_delay_follow, _, _ = load_delay_settings()
 
     for follower_user in users:
         follower_fid = follower_user.get("fid")
         follower_bearer = follower_user.get("bearer")
         follower_username = follower_user.get("username", "Unknown")
+        follower_proxy = follower_user.get("proxy")
 
         if not follower_fid or not follower_bearer:
             print(f"Skipping user {follower_username}: Missing FID or bearer token.")
             continue
 
         print(f"User '{follower_username}' (FID: {follower_fid}) will now follow others.")
-        bot = FarcasterBot(follower_bearer)
+        bot = FarcasterBot(follower_bearer, follower_proxy)
 
         for target_user in users:
             target_fid = target_user.get("fid")
@@ -653,27 +714,20 @@ def follow_unfollow_single_target_for_all_users(user_info_path="user_info.json")
 
     print(f"Semua akun akan mencoba {action_choice} FID {target_fid}...")
 
-    while True:
-        try:
-            min_delay_action = float(input("Masukkan delay minimum (detik) antara aksi (misal: 1): "))
-            max_delay_action = float(input("Masukkan delay maksimum (detik) antara aksi (misal: 5): "))
-            if min_delay_action < 0 or max_delay_action < min_delay_action:
-                raise ValueError("Delay tidak valid.")
-            break
-        except ValueError as e:
-            print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
+    min_delay_action, max_delay_action, _, _ = load_delay_settings()
 
     for user in users:
         user_fid = user.get("fid")
         user_bearer = user.get("bearer")
         user_username = user.get("username", "Unknown")
+        user_proxy = user.get("proxy")
 
         if not user_fid or not user_bearer:
             print(f"Skipping user {user_username}: Missing FID or bearer token.")
             continue
 
         print(f"\nUser '{user_username}' (FID: {user_fid}) sedang memproses...")
-        bot = FarcasterBot(user_bearer)
+        bot = FarcasterBot(user_bearer, user_proxy)
 
         if action_choice == 'follow':
             if bot.is_following(target_fid):
@@ -801,11 +855,12 @@ def process_onboarding_info():
 if __name__ == "__main__":
     print("Pilih mode operasi:")
     print("1. Post Casts dari post.txt")
-    print("2. Auto Like dan Recast")
-    print("3. Follow/Unfollow User")
-    print("4. Follow All Users")
-    print("5. Ambil Info User (dari bearer.txt)")
-    choice = input("Masukkan pilihan (1/2/3/4/5): ")
+    print("2. Auto like dan recast by url/hash")
+    print("3. Auto Like dan Recast semua pengguna kita")
+    print("4. Follow/Unfollow User")
+    print("5. Follow All Users pengguna kita")
+    print("6. Ambil Info User (dari bearer.txt)")
+    choice = input("Masukkan pilihan (1/2/3/4/5/6): ")
 
     if choice == '1':
         print("\nPilih opsi Post Casts:")
@@ -820,6 +875,8 @@ if __name__ == "__main__":
         else:
             print("Pilihan tidak valid.")
     elif choice == '2':
+        like_and_recast_by_url()
+    elif choice == '3':
         print("\nPilih opsi Auto Like dan Recast:")
         print("1. Auto Like dan Recast untuk semua akun")
         print("2. Auto Like dan Recast untuk akun terpilih")
@@ -831,7 +888,7 @@ if __name__ == "__main__":
             auto_like_recast_for_single_user()
         else:
             print("Pilihan tidak valid.")
-    elif choice == '3':
+    elif choice == '4':
         print("\nPilih opsi Follow/Unfollow:")
         print("1. Follow/Unfollow satu akun (pilih akun Anda)")
         print("2. Follow/Unfollow satu target untuk semua akun Anda")
@@ -862,10 +919,11 @@ if __name__ == "__main__":
                 if 0 <= selected_user_index < len(users):
                     selected_user = users[selected_user_index]
                     liker_bearer = selected_user.get("bearer")
+                    liker_proxy = selected_user.get("proxy")
                     if not liker_bearer:
                         print("Bearer token tidak ditemukan untuk akun ini.")
                         # return removed because it's not inside a function
-                    bot = FarcasterBot(liker_bearer)
+                    bot = FarcasterBot(liker_bearer, liker_proxy)
 
                     target_fid_str = input("Masukkan FID target (yang ingin di-follow/unfollow): ")
                     try:
@@ -893,16 +951,7 @@ if __name__ == "__main__":
             except ValueError:
                 print("Input tidak valid. Masukkan nomor.")
 
-            while True:
-                try:
-                    min_delay_action = float(input("Masukkan delay minimum (detik) antara aksi (misal: 1): "))
-                    max_delay_action = float(input("Masukkan delay maksimum (detik) antara aksi (misal: 5): "))
-                    if min_delay_action < 0 or max_delay_action < min_delay_action:
-                        raise ValueError("Delay tidak valid.")
-                    break
-                except ValueError as e:
-                    print(f"Input tidak valid: {e}. Mohon masukkan angka yang benar.")
-
+            min_delay_action, max_delay_action, _, _ = load_delay_settings()
             # Apply delay after the action
             time.sleep(random.uniform(min_delay_action, max_delay_action))
 
@@ -910,9 +959,9 @@ if __name__ == "__main__":
             follow_unfollow_single_target_for_all_users()
         else:
             print("Pilihan tidak valid.")
-    elif choice == '4':
-        follow_all_users()
     elif choice == '5':
+        follow_all_users()
+    elif choice == '6':
         process_onboarding_info()
     else:
         print("Pilihan tidak valid.")
