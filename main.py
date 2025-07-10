@@ -55,6 +55,9 @@ class FarcasterBot:
             }
 
         try:
+            proxy_status = f"menggunakan proxy: {self.proxy}" if self.proxy else "menggunakan koneksi langsung"
+            print(f"  Melakukan permintaan {method} ke {url} {proxy_status}...")
+
             if method == "GET":
                 response = requests.get(url, headers=headers, params=params, proxies=proxies, timeout=10)
             elif method == "POST":
@@ -367,14 +370,40 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         print("No users found in user_info.json.")
         return
 
-    cast_url = input("Masukkan URL postingan yang akan di-like dan di-recast: ")
-    if not cast_url.strip():
-        print("URL tidak boleh kosong.")
+    cast_input = input("Masukkan URL atau Hash postingan yang akan di-like dan di-recast: ").strip()
+    if not cast_input:
+        print("Input tidak boleh kosong.")
         return
 
-    print(f"Semua {len(users)} pengguna akan me-like dan me-recast: {cast_url}")
+    target_cast_hash = None
+    if cast_input.startswith("http") and "farcaster.xyz" in cast_input:
+        try:
+            # Ini akan memanggil _extract_username_and_prefix dan _get_full_cast_hash
+            # Kita perlu bot instance untuk ini, jadi kita akan buat sementara
+            # atau asumsikan bot pertama bisa digunakan untuk mendapatkan hash
+            # Untuk kesederhanaan, kita akan coba ekstrak langsung di sini
+            # dan jika gagal, kita akan tangani di loop
+            temp_bot = FarcasterBot(users[0].get("bearer"), users[0].get("proxy"))
+            username, prefix = temp_bot._extract_username_and_prefix(cast_input)
+            target_cast_hash = temp_bot._get_full_cast_hash(username, prefix)
+            print(f"Ditemukan hash dari URL: {target_cast_hash}")
+        except Exception as e:
+            print(f"Error saat mengekstrak hash dari URL: {e}. Pastikan URL valid.")
+            return
+    elif cast_input.startswith("0x") and (len(cast_input) == 66 or len(cast_input) == 42): # Hash Farcaster biasanya 66 karakter (0x + 64 hex) atau 42 karakter untuk reply
+        target_cast_hash = cast_input
+        print(f"Menggunakan hash langsung: {target_cast_hash}")
+    else:
+        print("Input tidak valid. Harap masukkan URL Farcaster yang valid atau hash postingan (dimulai dengan 0x).")
+        return
 
-    min_delay_action, max_delay_action, min_delay_between_users, max_delay_between_users = load_delay_settings()
+    if not target_cast_hash:
+        print("Tidak dapat menentukan hash postingan. Proses dibatalkan.")
+        return
+
+    print(f"Semua {len(users)} pengguna akan me-like dan me-recast postingan dengan hash: {target_cast_hash}")
+
+    min_delay_action, max_delay_action, min_delay_between_users, max_delay_between_users, _ = load_delay_settings()
 
     for user in users:
         user_fid = user.get("fid")
@@ -392,7 +421,7 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         # Like
         print(f"  Mencoba me-like postingan...")
         try:
-            if bot.like_cast_by_url(cast_url):
+            if bot._like_cast(target_cast_hash): # Panggil _like_cast langsung dengan hash
                 print(f"    Berhasil me-like postingan.")
             else:
                 print(f"    Gagal me-like postingan (mungkin sudah di-like).")
@@ -404,7 +433,7 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         # Recast
         print(f"  Mencoba me-recast postingan...")
         try:
-            if bot.recast_cast_by_url(cast_url):
+            if bot.recast_cast(target_cast_hash): # Panggil recast_cast langsung dengan hash
                 print(f"    Berhasil me-recast postingan.")
             else:
                 print(f"    Gagal me-recast postingan (mungkin sudah di-recast).")
@@ -414,7 +443,7 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         print(f"User '{user_username}' selesai. Menunggu sebelum pengguna berikutnya...")
         time.sleep(random.uniform(min_delay_between_users, max_delay_between_users))
 
-    print("Proses Like & Recast by URL selesai.")
+    print("Proses Like & Recast selesai.")
 
 def auto_like_and_recast_posts(user_info_path="user_info.json"):
 
