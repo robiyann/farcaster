@@ -1,0 +1,7 @@
+{
+  "min_action_delay": 4,
+  "max_action_delay": 15,
+  "min_user_delay": 4,
+  "max_user_delay": 20,
+  "retry_delay": 10
+}
