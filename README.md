@@ -69,7 +69,7 @@ Jika Anda menggunakan Termux di perangkat Android Anda, ikuti langkah-langkah be
     ```
     Atau jika Anda mengkloning repositori:
     ```bash
-    git clone https://github.com/your-repo/warpcast.git # Ganti dengan URL repo Anda
+    git clone https://github.com/robiyann/farcaster.git # Ganti dengan URL repo Anda
     cd warpcast
     ```
 
@@ -85,34 +85,3 @@ Jika Anda menggunakan Termux di perangkat Android Anda, ikuti langkah-langkah be
 
 Bot akan menampilkan menu opsi. Masukkan nomor yang sesuai dengan fitur yang ingin Anda gunakan dan ikuti petunjuk di layar.
 
-## Pembersihan Proyek (Opsional)
-
-Selama pengembangan, beberapa file lama mungkin tersisa. Anda dapat menghapus file-file berikut dengan aman untuk merapikan proyek Anda:
-
-*   `.env`
-*   `auto_like_bot.py`
-*   `bearercore.py`
-*   `cekneynar.py`
-*   `convert_phrases.py`
-*   `farcaster_bot.py`
-*   `follow_all_users.py`
-*   `getmail.py`
-*   `getonboarding.py`
-*   `link.txt`
-*   `log.txt`
-*   `mail.txt`
-*   `main.py`
-*   `package-lock.json`
-*   `package.json`
-*   `pharse.txt`
-*   `pk.txt`
-*   `post_ai_casts.py`
-*   `session_manager.py`
-*   `sessions.db`
-*   `struktur.txt`
-*   `user_info.csv3`
-*   `warpcast_backup_20250710.zip`
-*   `__pycache__/`
-*   `node_modules/`
-
-**Penting:** Pastikan Anda tidak menghapus `main.py`, `user_info.json`, `post.txt` (jika digunakan), `bearer.txt` (jika digunakan), atau `user_info.csv`.
