@@ -521,7 +521,7 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
-                print(f"Fetched latest cast for {target_username} (FID: {target_fid}): {latest_cast_hash[:8]}...")
+                print(f"Fetched latest cast for {target_username} (FID: {target_fid}): {latest_cast_hash.get('hash')[:8]}...")
             else:
                 print(f"No recent posts found for {target_username} (FID: {target_fid}).")
 
@@ -659,7 +659,7 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
-                print(f"Fetched latest cast for {target_username} (FID: {target_fid}): {latest_cast_hash[:8]}...")
+                print(f"Fetched latest cast for {target_username} (FID: {target_fid}): {latest_cast_hash.get('hash')[:8]}...")
             else:
                 print(f"No recent posts found for {target_username} (FID: {target_fid}).")
 
@@ -951,8 +951,7 @@ if __name__ == "__main__":
     print("3. Auto Like dan Recast semua pengguna kita")
     print("4. Follow/Unfollow User")
     print("5. Follow antar akun Kita")
-    print("6. Saling Like & Recast Antar Akun (Postingan Terakhir)")
-    print("7. Ambil Info User (dari bearer.txt)")
+    print("6. Ambil Info User (dari bearer.txt)")
     choice = input("Masukkan pilihan (1/2/3/4/5/6/7): ")
 
     if choice == '1':
@@ -1055,8 +1054,6 @@ if __name__ == "__main__":
     elif choice == '5':
         follow_all_users()
     elif choice == '6':
-        auto_like_and_recast_posts()
-    elif choice == '7':
         process_onboarding_info()
     else:
         print("Pilihan tidak valid.")
