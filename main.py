@@ -167,6 +167,21 @@ class FarcasterBot:
             return casts[0]["hash"]
         raise Exception("Gagal mengambil hash lengkap.")
 
+    def _get_cast_details(self, cast_hash, username):
+        url = f"{self.base_url}/v2/user-thread-casts"
+        params = {
+            "castHashPrefix": cast_hash[:10], # Gunakan prefix hash untuk pencarian
+            "username": username,
+            "limit": 1 # Hanya butuh 1 cast
+        }
+        response = self._make_request("GET", url, params=params)
+        if response and response.status_code == 200:
+            data = response.json()
+            casts = data.get("result", {}).get("casts", [])
+            if casts and casts[0].get("hash") == cast_hash:
+                return casts[0]
+        return None
+
     def get_latest_cast_hash(self, fid):
         url = f"{self.base_url}/v2/profile-casts"
         params = {
@@ -178,7 +193,11 @@ class FarcasterBot:
             data = response.json()
             casts = data.get("result", {}).get("casts", [])
             if casts:
-                return casts[0]["hash"]
+                latest_cast = casts[0]
+                return {
+                    "hash": latest_cast.get("hash"),
+                    "username": latest_cast.get("author", {}).get("username")
+                }
         return None
 
     def is_following(self, target_fid):
@@ -189,21 +208,17 @@ class FarcasterBot:
             return data.get("result", {}).get("user", {}).get("viewerContext", {}).get("following", False)
         return False
 
-    def is_liked(self, cast_hash):
-        url = f"{self.base_url}/v2/casts?hash={cast_hash}"
-        response = self._make_request("GET", url)
-        if response and response.ok:
-            data = response.json()
-            return data.get("result", {}).get("cast", {}).get("viewerContext", {}).get("reacted", False)
-        return False
+    def is_liked(self, cast_hash, username):
+        cast_details = self._get_cast_details(cast_hash, username)
+        if cast_details:
+            return cast_details.get("viewerContext", {}).get("reacted", False)
+        return None # Return None on error or if cast details not found
 
-    def is_recasted(self, cast_hash):
-        url = f"{self.base_url}/v2/casts?hash={cast_hash}"
-        response = self._make_request("GET", url)
-        if response and response.ok:
-            data = response.json()
-            return data.get("result", {}).get("cast", {}).get("viewerContext", {}).get("recast", False)
-        return False
+    def is_recasted(self, cast_hash, username):
+        cast_details = self._get_cast_details(cast_hash, username)
+        if cast_details:
+            return cast_details.get("viewerContext", {}).get("recast", False)
+        return None # Return None on error or if cast details not found
 
 def load_delay_settings():
     try:
@@ -420,25 +435,54 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
 
         # Like
         print(f"  Mencoba me-like postingan...")
-        try:
-            if bot._like_cast(target_cast_hash): # Panggil _like_cast langsung dengan hash
-                print(f"    Berhasil me-like postingan.")
-            else:
-                print(f"    Gagal me-like postingan (mungkin sudah di-like).")
-        except Exception as e:
-            print(f"    Terjadi error saat me-like: {e}")
+        # Cek apakah sudah disukai
+        # Perhatikan bahwa username sudah diekstrak dari URL di awal fungsi
+        liked_status = bot.is_liked(target_cast_hash, username) # Gunakan username yang sudah diekstrak
+        if liked_status is True:
+            print(f"    Postingan sudah disukai oleh {user_username}. Melewatkan like.")
+        elif liked_status is False:
+            try:
+                if bot._like_cast(target_cast_hash):
+                    print(f"    Berhasil me-like postingan.")
+                else:
+                    print(f"    Gagal me-like postingan.")
+            except Exception as e:
+                print(f"    Terjadi error saat me-like: {e}")
+        else:
+            print(f"    Tidak dapat memeriksa status like. Mencoba me-like...")
+            try:
+                if bot._like_cast(target_cast_hash):
+                    print(f"    Berhasil me-like postingan.")
+                else:
+                    print(f"    Gagal me-like postingan.")
+            except Exception as e:
+                print(f"    Terjadi error saat me-like: {e}")
 
         time.sleep(random.uniform(min_delay_action, max_delay_action))
 
         # Recast
         print(f"  Mencoba me-recast postingan...")
-        try:
-            if bot.recast_cast(target_cast_hash): # Panggil recast_cast langsung dengan hash
-                print(f"    Berhasil me-recast postingan.")
-            else:
-                print(f"    Gagal me-recast postingan (mungkin sudah di-recast).")
-        except Exception as e:
-            print(f"    Terjadi error saat me-recast: {e}")
+        # Cek apakah sudah di-recast
+        recasted_status = bot.is_recasted(target_cast_hash, username) # Gunakan username yang sudah diekstrak
+        if recasted_status is True:
+            print(f"    Postingan sudah di-recast oleh {user_username}. Melewatkan recast.")
+        elif recasted_status is False:
+            try:
+                if bot.recast_cast(target_cast_hash):
+                    print(f"    Berhasil me-recast postingan.")
+                else:
+                    print(f"    Gagal me-recast postingan.")
+            except Exception as e:
+                print(f"    Terjadi error saat me-recast: {e}")
+        else:
+            print(f"    Tidak dapat memeriksa status recast. Mencoba me-recast...")
+            try:
+                if bot.recast_cast(target_cast_hash):
+                    print(f"    Berhasil me-recast postingan.")
+                else:
+                    print(f"    Gagal me-recast postingan.")
+            except Exception as e:
+                print(f"    Terjadi error saat me-recast: {e}")
 
         print(f"User '{user_username}' selesai. Menunggu sebelum pengguna berikutnya...")
         time.sleep(random.uniform(min_delay_between_users, max_delay_between_users))
@@ -463,7 +507,7 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
 
     print(f"Found {len(users)} users. Starting auto-like and recast process...")
 
-    min_delay_likes_recasts, max_delay_likes_recasts, min_delay_between_users, max_delay_between_users = load_delay_settings()
+    min_delay_likes_recasts, max_delay_likes_recasts, min_delay_between_users, max_delay_between_users, _ = load_delay_settings()
 
     # Optimization: Fetch all latest cast hashes once
     all_latest_casts = {}
@@ -473,7 +517,7 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
         if target_fid:
             # Use a temporary bot instance to fetch public cast info
             # This assumes any bearer token can fetch public cast info
-            temp_bot = FarcasterBot(user.get("bearer"), user.get("proxy")) 
+            temp_bot = FarcasterBot(user.get("bearer"), None) 
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
@@ -504,38 +548,51 @@ def auto_like_and_recast_posts(user_info_path="user_info.json"):
             if not target_fid:
                 continue
 
-            latest_cast_hash = all_latest_casts.get(target_fid)
+            latest_cast_info = all_latest_casts.get(target_fid)
 
-            if latest_cast_hash:
+            if latest_cast_info:
+                hash_string = latest_cast_info.get("hash")
+                username_string = latest_cast_info.get("username")
+
+                if not hash_string or not username_string:
+                    print(f"    Informasi hash atau username tidak lengkap untuk FID {target_fid}. Melewatkan.")
+                    continue
+
                 print(f"  {liker_username} is trying to like and recast {target_username}'s latest post...")
                 
                 # Cek apakah sudah disukai
-                if liker_bot.is_liked(latest_cast_hash):
-                    print(f"    Postingan {target_username} (Hash: {latest_cast_hash[:8]}...) sudah disukai oleh {liker_username}. Melewatkan like.")
-                else:
+                liked_status = liker_bot.is_liked(hash_string, username_string)
+                if liked_status is True:
+                    print(f"    Postingan {target_username} (Hash: {hash_string[:8]}...) sudah disukai oleh {liker_username}. Melewatkan like.")
+                elif liked_status is False:
                     try:
-                        success_like = liker_bot._like_cast(latest_cast_hash)
+                        success_like = liker_bot._like_cast(hash_string)
                         if success_like:
-                            print(f"    Successfully liked {target_username}'s post (Hash: {latest_cast_hash[:8]}...).")
+                            print(f"    Successfully liked {target_username}'s post (Hash: {hash_string[:8]}...).")
                         else:
                             print(f"    Failed to like {target_username}'s post.")
                     except Exception as e:
                         print(f"    An error occurred while {liker_username} tried to like {target_username}'s post: {e}")
+                else:
+                    print(f"    Tidak dapat memeriksa status like untuk {target_username}'s post (Hash: {hash_string[:8]}...). Melewatkan like.")
 
                 time.sleep(random.uniform(min_delay_likes_recasts, max_delay_likes_recasts))
 
                 # Cek apakah sudah di-recast
-                if liker_bot.is_recasted(latest_cast_hash):
-                    print(f"    Postingan {target_username} (Hash: {latest_cast_hash[:8]}...) sudah di-recast oleh {liker_username}. Melewatkan recast.")
-                else:
+                recasted_status = liker_bot.is_recasted(hash_string, username_string)
+                if recasted_status is True:
+                    print(f"    Postingan {target_username} (Hash: {hash_string[:8]}...) sudah di-recast oleh {liker_username}. Melewatkan recast.")
+                elif recasted_status is False:
                     try:
-                        success_recast = liker_bot.recast_cast(latest_cast_hash)
+                        success_recast = liker_bot.recast_cast(hash_string)
                         if success_recast:
-                            print(f"    Successfully recast {target_username}'s post (Hash: {latest_cast_hash[:8]}...).")
+                            print(f"    Successfully recast {target_username}'s post (Hash: {hash_string[:8]}...).")
                         else:
                             print(f"    Failed to recast {target_username}'s post.")
                     except Exception as e:
                         print(f"    An error occurred while {liker_username} tried to recast {target_username}'s post: {e}")
+                else:
+                    print(f"    Tidak dapat memeriksa status recast untuk {target_username}'s post (Hash: {hash_string[:8]}...). Melewatkan recast.")
             else:
                 print(f"    No latest post found for {target_username} to like/recast.")
             
@@ -598,7 +655,7 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
         target_fid = user.get("fid")
         target_username = user.get("username", "Unknown")
         if target_fid:
-            temp_bot = FarcasterBot(user.get("bearer"), user.get("proxy")) 
+            temp_bot = FarcasterBot(user.get("bearer"), None) 
             latest_cast_hash = temp_bot.get_latest_cast_hash(target_fid)
             if latest_cast_hash:
                 all_latest_casts[target_fid] = latest_cast_hash
@@ -622,9 +679,10 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
             print(f"  {liker_username} is trying to like and recast {target_username}'s latest post...")
             
             # Cek apakah sudah disukai
-            if liker_bot.is_liked(latest_cast_hash):
+            liked_status = liker_bot.is_liked(latest_cast_hash, target_username)
+            if liked_status is True:
                 print(f"    Postingan {target_username} (Hash: {latest_cast_hash[:8]}...) sudah disukai oleh {liker_username}. Melewatkan like.")
-            else:
+            elif liked_status is False:
                 try:
                     success_like = liker_bot._like_cast(latest_cast_hash)
                     if success_like:                        print(f"    Successfully liked {target_username}'s post (Hash: {latest_cast_hash[:8]}...).")
@@ -632,11 +690,14 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
                         print(f"    Failed to like {target_username}'s post.")
                 except Exception as e:
                     print(f"    An error occurred while {liker_username} tried to like {target_username}'s post: {e}")
+            else:
+                print(f"    Tidak dapat memeriksa status like untuk {target_username}'s post (Hash: {latest_cast_hash[:8]}...). Melewatkan like.")
 
             # Cek apakah sudah di-recast
-            if liker_bot.is_recasted(latest_cast_hash):
+            recasted_status = liker_bot.is_recasted(latest_cast_hash, target_username)
+            if recasted_status is True:
                 print(f"    Postingan {target_username} (Hash: {latest_cast_hash[:8]}...) sudah di-recast oleh {liker_username}. Melewatkan recast.")
-            else:
+            elif recasted_status is False:
                 try:
                     success_recast = liker_bot.recast_cast(latest_cast_hash)
                     if success_recast:
@@ -645,6 +706,8 @@ def auto_like_recast_for_single_user(user_info_path="user_info.json"):
                         print(f"    Failed to recast {target_username}'s post.")
                 except Exception as e:
                     print(f"    An error occurred while {liker_username} tried to recast {target_username}'s post: {e}")
+            else:
+                print(f"    Tidak dapat memeriksa status recast untuk {target_username}'s post (Hash: {latest_cast_hash[:8]}...). Melewatkan recast.")
         else:
             print(f"    No latest post found for {target_username} to like/recast.")
         
@@ -743,7 +806,7 @@ def follow_unfollow_single_target_for_all_users(user_info_path="user_info.json")
 
     print(f"Semua akun akan mencoba {action_choice} FID {target_fid}...")
 
-    min_delay_action, max_delay_action, _, _ = load_delay_settings()
+    min_delay_action, max_delay_action, _, _, _ = load_delay_settings()
 
     for user in users:
         user_fid = user.get("fid")
@@ -888,8 +951,9 @@ if __name__ == "__main__":
     print("3. Auto Like dan Recast semua pengguna kita")
     print("4. Follow/Unfollow User")
     print("5. Follow antar akun Kita")
-    print("6. Ambil Info User (dari bearer.txt)")
-    choice = input("Masukkan pilihan (1/2/3/4/5/6): ")
+    print("6. Saling Like & Recast Antar Akun (Postingan Terakhir)")
+    print("7. Ambil Info User (dari bearer.txt)")
+    choice = input("Masukkan pilihan (1/2/3/4/5/6/7): ")
 
     if choice == '1':
         print("\nPilih opsi Post Casts:")
@@ -980,7 +1044,7 @@ if __name__ == "__main__":
             except ValueError:
                 print("Input tidak valid. Masukkan nomor.")
 
-            min_delay_action, max_delay_action, _, _ = load_delay_settings()
+            min_delay_action, max_delay_action, _, _, _ = load_delay_settings()
             # Apply delay after the action
             time.sleep(random.uniform(min_delay_action, max_delay_action))
 
@@ -991,6 +1055,8 @@ if __name__ == "__main__":
     elif choice == '5':
         follow_all_users()
     elif choice == '6':
+        auto_like_and_recast_posts()
+    elif choice == '7':
         process_onboarding_info()
     else:
         print("Pilihan tidak valid.")
