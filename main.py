@@ -391,13 +391,10 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         return
 
     target_cast_hash = None
+    username = None  # Inisialisasi username
+
     if cast_input.startswith("http") and "farcaster.xyz" in cast_input:
         try:
-            # Ini akan memanggil _extract_username_and_prefix dan _get_full_cast_hash
-            # Kita perlu bot instance untuk ini, jadi kita akan buat sementara
-            # atau asumsikan bot pertama bisa digunakan untuk mendapatkan hash
-            # Untuk kesederhanaan, kita akan coba ekstrak langsung di sini
-            # dan jika gagal, kita akan tangani di loop
             temp_bot = FarcasterBot(users[0].get("bearer"), users[0].get("proxy"))
             username, prefix = temp_bot._extract_username_and_prefix(cast_input)
             target_cast_hash = temp_bot._get_full_cast_hash(username, prefix)
@@ -405,7 +402,7 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
         except Exception as e:
             print(f"Error saat mengekstrak hash dari URL: {e}. Pastikan URL valid.")
             return
-    elif cast_input.startswith("0x") and (len(cast_input) == 66 or len(cast_input) == 42): # Hash Farcaster biasanya 66 karakter (0x + 64 hex) atau 42 karakter untuk reply
+    elif cast_input.startswith("0x") and (len(cast_input) == 66 or len(cast_input) == 42):
         target_cast_hash = cast_input
         print(f"Menggunakan hash langsung: {target_cast_hash}")
     else:
@@ -435,21 +432,17 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
 
         # Like
         print(f"  Mencoba me-like postingan...")
-        # Cek apakah sudah disukai
-        # Perhatikan bahwa username sudah diekstrak dari URL di awal fungsi
-        liked_status = bot.is_liked(target_cast_hash, username) # Gunakan username yang sudah diekstrak
-        if liked_status is True:
-            print(f"    Postingan sudah disukai oleh {user_username}. Melewatkan like.")
-        elif liked_status is False:
-            try:
-                if bot._like_cast(target_cast_hash):
-                    print(f"    Berhasil me-like postingan.")
-                else:
-                    print(f"    Gagal me-like postingan.")
-            except Exception as e:
-                print(f"    Terjadi error saat me-like: {e}")
-        else:
-            print(f"    Tidak dapat memeriksa status like. Mencoba me-like...")
+        
+        perform_like = True
+        if username: # Hanya cek jika username ada (dari URL)
+            liked_status = bot.is_liked(target_cast_hash, username)
+            if liked_status is True:
+                print(f"    Postingan sudah disukai oleh {user_username}. Melewatkan like.")
+                perform_like = False
+            elif liked_status is None:
+                print(f"    Tidak dapat memeriksa status like. Tetap mencoba me-like...")
+
+        if perform_like:
             try:
                 if bot._like_cast(target_cast_hash):
                     print(f"    Berhasil me-like postingan.")
@@ -462,20 +455,16 @@ def like_and_recast_by_url(user_info_path="user_info.json"):
 
         # Recast
         print(f"  Mencoba me-recast postingan...")
-        # Cek apakah sudah di-recast
-        recasted_status = bot.is_recasted(target_cast_hash, username) # Gunakan username yang sudah diekstrak
-        if recasted_status is True:
-            print(f"    Postingan sudah di-recast oleh {user_username}. Melewatkan recast.")
-        elif recasted_status is False:
-            try:
-                if bot.recast_cast(target_cast_hash):
-                    print(f"    Berhasil me-recast postingan.")
-                else:
-                    print(f"    Gagal me-recast postingan.")
-            except Exception as e:
-                print(f"    Terjadi error saat me-recast: {e}")
-        else:
-            print(f"    Tidak dapat memeriksa status recast. Mencoba me-recast...")
+        perform_recast = True
+        if username: # Hanya cek jika username ada (dari URL)
+            recasted_status = bot.is_recasted(target_cast_hash, username)
+            if recasted_status is True:
+                print(f"    Postingan sudah di-recast oleh {user_username}. Melewatkan recast.")
+                perform_recast = False
+            elif recasted_status is None:
+                print(f"    Tidak dapat memeriksa status recast. Tetap mencoba me-recast...")
+
+        if perform_recast:
             try:
                 if bot.recast_cast(target_cast_hash):
                     print(f"    Berhasil me-recast postingan.")
